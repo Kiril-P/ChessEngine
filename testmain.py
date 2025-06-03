@@ -3,225 +3,114 @@ from var import *
 from initi import *
 from basfunc import *
 
-MaxDepth=2
-piece_value={'P':10,'N':30,'B':30,'R':50,'Q':90,'K':1000}
-##fenrecord= 10 * ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR/"]
+from savingtsptables import enhanced_best_move, load_transposition_table, save_transposition_table, enhanced_tt
 
-"""
-functions to  ( maybe ) work with fen reps
-#done
-def GetFen():
-    maherstr=""
-    global fenrecord
-    for rank in range(ROWS):
-        space_count=0
-        for file in range(COLS):
-      
-            curpiece = game_state.board[rank][file]
-            if curpiece=="":
-                space_count+=1
-            else:
-                piece_colorizer=(curpiece[1] if curpiece[0]=='w' else curpiece[1].lower())
-                maherstr+=(str(space_count) +  piece_colorizer) if space_count else piece_colorizer
-                space_count=0
-        maherstr+=str(space_count) if space_count else ""
-        maherstr+='/'
-    fenrecord=fenrecord[1:]+[maherstr]
-    print(fenrecord)
-    
+MaxDepth = 4
 
-#still not done        
-def DeFenalizer():
-    future_board=[]
-    global fenrecord
-    refboard=fenrecord[-1]
-    fenrecord=[""]+fenrecord[:-1]
-    s=0
-    for k in range(0,8):
-    
-        i=s
-        line=[]
-        while refboard[i]!='/':
-            line+=(int(refboard[i])*"") if (refboard[i]<='8' and refboard[i]>='0') else refboard[i]
-            i+=1
-            s=i+1
-       """ 
-        
-        
-    
+piece_value = {'P': 10, 'N': 30, 'B': 30, 'R': 50, 'Q': 90, 'K': 1000}
 
-def state_copy(current_turn):
-    board_copy = game_state.board.copy()
-    for i in range(len(board_copy)):
-        board_copy[i] = board_copy[i][:]
-    
-    piece_moved_copy = game_state.piece_has_moved.copy()
-    return {
-        'board': board_copy,
-        'current_turn': current_turn,
-        'piece_has_moved': piece_moved_copy
-    }    
-        
-def undo_move1(state):
-    game_state.board = state['board']
-    game_state.current_turn = state['current_turn']
-    game_state.piece_has_moved = state['piece_has_moved']
-    
 def board_score():
     score = 0
-    
     for rank in range(ROWS):
         for file in range(COLS):
             curpiece = game_state.board[rank][file]
             if curpiece != "":
                 value = piece_value[curpiece[1]]
                 score += (value if curpiece[0] == 'w' else -value)
-                
     return score
-    
-def basicMinMax(depth, current_turn,alpha,beta):
-    if depth == 0 or game_state.game_over:
-        return board_score()
-    
-    if current_turn == 'w':
-        max_score = -float('inf')
-        
-        for rank in range(ROWS):
-            for file in range(COLS):
-                piece = game_state.board[rank][file]
-                if piece != "" and piece[0] == 'w':
-                    moves = get_legal_moves(piece, rank, file)
-                    for move_rank, move_file in moves:
-                        state = state_copy('w')
-                        
-                        game_state.board[move_rank][move_file] = piece
-                        game_state.board[rank][file] = ""
-                        
-                        
-                        move_value = basicMinMax(depth-1, 'b',alpha,beta)
-                        
-                        undo_move1(state)
-                        alpha=max(alpha,move_value)
-                        if beta<=alpha:
-                            return alpha
-                        max_score = max(max_score, move_value)
-                        
-                        
-        return max_score
-    
-    else:
-        min_score = float('inf')
-        
-        for rank in range(ROWS):
-            for file in range(COLS):
-                piece = game_state.board[rank][file]
-                
-                if piece != "" and piece[0] == 'b':
-                    moves = get_legal_moves(piece, rank, file)
-                    
-                    for move_rank, move_file in moves:
-                        state = state_copy('b')
-                        
-                        game_state.board[move_rank][move_file] = piece
-                        game_state.board[rank][file] = ""
-                        
-                        move_value = basicMinMax(depth-1, 'w',alpha,beta)
-                        undo_move1(state)
-                        
-                        beta=min(beta,move_value)
-                        if beta<=alpha:
-                            return beta
-                        min_score = min(min_score, move_value)
-                        
-                        
-                        
-        return min_score
-    
-def bMMbestmove(current_turn):
-    best_score = -float('inf') if current_turn == 'w' else float('inf')
-    best_move = None
+
+def board_score_fast():
+    """Lightning-fast evaluation"""
+    score = 0
+    piece_values = {'P': 100, 'N': 320, 'B': 330, 'R': 500, 'Q': 900, 'K': 0}
     
     for rank in range(ROWS):
         for file in range(COLS):
             piece = game_state.board[rank][file]
-            if piece != "" and piece[0] == current_turn:
-                moves = get_legal_moves(piece, rank, file)
-                for move_rank, move_file in moves:
-                    state = state_copy(current_turn)
-                    game_state.board[move_rank][move_file] = piece
-                    game_state.board[rank][file] = ""
-                    old_turn = current_turn
-                    next_turn = 'b' if current_turn == 'w' else 'w'
-       
-                    score = basicMinMax(MaxDepth, next_turn,-5000,5000)  
-                    if (old_turn == 'w' and score > best_score) or (old_turn == 'b' and score < best_score):
-                        best_score = score
-                        best_move = ((rank, file), (move_rank, move_file))
-                    
-                    undo_move1(state)
-    
-    if best_move:
-        (orig_r, orig_c), (dest_r, dest_c) = best_move
-        piece_to_move = game_state.board[orig_r][orig_c]
-        
-        if piece_to_move[1] == 'K':
-            # black short castle
-            if orig_r == 0 and orig_c == 4 and dest_r == 0 and dest_c == 6:
-                # move rook from (0,7)->(0,5)
-                game_state.board[0][5] = 'bR'
-                game_state.board[0][7] = ''
-            # black long castle
-            elif orig_r == 0 and orig_c == 4 and dest_r == 0 and dest_c == 2:
-                game_state.board[0][3] = 'bR'
-                game_state.board[0][0] = ''
+            if piece:
+                value = piece_values[piece[1]]
+                if piece[0] == 'w':
+                    score += value
+                else:
+                    score -= value
+    return score
 
-        # 4) do the move
-        game_state.board[dest_r][dest_c] = piece_to_move
-        game_state.board[orig_r][orig_c] = ""
-        game_state.last_move = [(orig_r, orig_c), (dest_r, dest_c)]
-
-        # 5) Mark if King/Rook moved from original square
-        if (orig_r, orig_c) in game_state.piece_has_moved:
-            game_state.piece_has_moved[(orig_r, orig_c)] = True
-        if piece_to_move[1] in ['K','R']:
-            game_state.piece_has_moved[(dest_r, dest_c)] = True
-
-        # 6) Pawn promotion (rare for black but can happen)
-        promote_pawn(dest_r, dest_c)
-        ##GetFen()
+# Keep your existing minimax for comparison/fallback
+def basicMinMax(depth, current_turn, alpha, beta):
+    if depth == 0 or game_state.game_over:
+        return board_score()
     
-    return best_move
-                            
+    moves = order_moves(current_turn)
     
+    if current_turn == 'w':
+        max_score = -float('inf')
+        for (from_p, to_p, piece) in moves:
+            move = make_move(from_p, to_p, piece)            
+            move_value = basicMinMax(depth-1, 'b', alpha, beta)
+            undo_move(move)
+            max_score = max(max_score, move_value)
+            alpha = max(alpha, move_value)
+            if beta <= alpha:
+                break
+        return max_score
+    else:
+        min_score = float('inf')
+        for (from_p, to_p, piece) in moves:
+            move = make_move(from_p, to_p, piece)            
+            move_value = basicMinMax(depth-1, 'w', alpha, beta)
+            undo_move(move)
+            min_score = min(min_score, move_value)
+            beta = min(beta, move_value)
+            if beta <= alpha:
+                break
+        return min_score
+
 def switch_turn():
     game_state.current_turn = 'b' if game_state.current_turn == 'w' else 'w'
 
-
 import time
+
 def main():
     load_piece_images()
+    load_transposition_table()  # Load the enhanced transposition table
+    
     running = True
-
+    game_state.current_turn = 'w'
+    update_king_cache()
+    
+    print("Enhanced Chess AI loaded!")
+    print("Transposition table ready.")
+    
     while running:
         mouse_pos = pygame.mouse.get_pos()
 
-        # If it's black's turn AND the game isn't over, black does a random move automatically.
+        # Black's turn - use the enhanced AI
         if game_state.current_turn == 'b' and not game_state.game_over:
-            start_time=time.time()
-            best_move = bMMbestmove('b')
+            start_time = time.time()
+            
+            print(f"\nBlack thinking (depth {MaxDepth})...")
+            
+            # Use the enhanced best move function instead of bMMbestmove_fast
+            best_move = enhanced_best_move('b', save=True, load=False)
             
             if best_move: 
                 switch_turn()
-                end_time=time.time()
-                print(f"Time for black move:  {end_time-start_time}")
+                end_time = time.time()
+                print(f"Black move completed in {end_time-start_time:.3f}s")
+                print(enhanced_tt.get_stats())  # Show cache performance
                 check_game_end()
+            else:
+                print("No legal moves found for black!")
+                game_state.game_over = True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                print("Saving transposition table...")
+                save_transposition_table()
                 running = False
 
             elif event.type == pygame.MOUSEBUTTONDOWN and not game_state.game_over:
-                # only let user move if it's White's turn
+                # Only let user move if it's White's turn
                 if game_state.current_turn == 'w':
                     rank = mouse_pos[1] // SQUARE_SIZE
                     file = mouse_pos[0] // SQUARE_SIZE
@@ -234,25 +123,31 @@ def main():
                                 game_state.selected_piece = piece
                                 game_state.selected_pos = (rank, file)
                                 game_state.legal_moves = possible_legal_moves
+                                print(f"Selected {piece} at ({rank},{file}) with {len(possible_legal_moves)} legal moves")
 
             elif event.type == pygame.MOUSEBUTTONUP and not game_state.game_over:
                 if game_state.current_turn == 'w' and game_state.selected_piece:
                     rank = mouse_pos[1] // SQUARE_SIZE
                     file = mouse_pos[0] // SQUARE_SIZE
                     orig_rank, orig_file = game_state.selected_pos
+                    
                     if is_valid_position(rank, file) and (rank, file) in game_state.legal_moves:
-                        # handle castling for White
+                        print(f"White moves {game_state.selected_piece} from ({orig_rank},{orig_file}) to ({rank},{file})")
+                        
+                        # Handle castling for White
                         if game_state.selected_piece[1] == 'K':
-                            # White short
+                            # White short castle
                             if (game_state.selected_piece[0] == 'w' and orig_rank == 7 and orig_file == 4
                                     and rank == 7 and file == 6):
                                 game_state.board[7][5] = 'wR'
                                 game_state.board[7][7] = ''
-                            # White long
+                                print("White castles kingside")
+                            # White long castle
                             elif (game_state.selected_piece[0] == 'w' and orig_rank == 7 and orig_file == 4
                                     and rank == 7 and file == 2):
                                 game_state.board[7][3] = 'wR'
                                 game_state.board[7][0] = ''
+                                print("White castles queenside")
 
                         game_state.board[rank][file] = game_state.selected_piece
                         game_state.board[orig_rank][orig_file] = ""
@@ -264,7 +159,7 @@ def main():
                         if game_state.selected_piece[1] in ['K','R']:
                             game_state.piece_has_moved[(rank, file)] = True
 
-                        promote_pawn(rank, file)
+                        promote_pawn(rank, file)  # Handle pawn promotion
                         switch_turn()
                         check_game_end()
 
@@ -272,19 +167,22 @@ def main():
                     game_state.selected_pos = None
                     game_state.legal_moves = []
 
-        screen.fill((0,0,0))
+        # Draw everything
+        screen.fill((0, 0, 0))
         draw_board()
 
-        # if a White piece is selected, let user drag
+        # If a White piece is selected, let user drag it
         if game_state.current_turn == 'w' and game_state.selected_piece and not game_state.game_over:
             piece_image = PIECE_IMAGES[game_state.selected_piece]
             piece_rect = piece_image.get_rect(center=mouse_pos)
             screen.blit(piece_image, piece_rect.topleft)
 
         pygame.display.flip()
-
+    
+    print("Final save of transposition table...")
+    save_transposition_table()
+    print(f"Final stats: {enhanced_tt.get_stats()}")
     pygame.quit()
-
 
 if __name__ == '__main__':
     main()

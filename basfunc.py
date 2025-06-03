@@ -1,23 +1,247 @@
 from var import *
 
+king_cache={'w':None,'b':None}
+
+def update_king_cache():
+    global king_cache
+    king_cache = {'w': None, 'b': None}
+    for rank in range(ROWS):
+        for file in range(COLS):
+            piece=game_state.board[rank][file]
+            if piece and piece[1]=='K':
+                king_cache[piece[0]]=(rank,file)
+
+def get_king_pos(color):
+    if king_cache[color] is None:
+        update_king_cache()
+    return king_cache[color]
+
+def is_square_attacked(rank,file,color):
+    pawn_direction= 1 if color=='w' else -1
+    pawn_rank=rank-pawn_direction
+    
+    if 0<=pawn_rank<ROWS:
+        for pawn_file in [file-1,file+1]:
+            if 0<=pawn_file<COLS:
+                piece=game_state.board[pawn_rank][pawn_file]
+                if piece==color+'P':
+                    return True
+    
+    knight_moves=[(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)]
+    for dr,df in knight_moves:
+        r=rank+dr
+        f=file+df
+        if 0<=r<ROWS and 0<=f<COLS:
+            piece=game_state.board[r][f]
+            if piece and piece==color+'N':
+                return True
+            
+    directions={
+        'R': [(1,0),(-1,0),(0,1),(0,-1)],
+        'B': [(1,1),(1,-1),(-1,1),(-1,-1)],
+        'Q': [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]
+    }
+    
+    for piece_type,directs in directions.items():
+        for dr,df in directs:
+            for squares in range(1,8):
+                r=rank+dr*squares
+                f=file+df*squares
+                if 0<=r<ROWS and 0<=f<COLS:
+                    piece=game_state.board[r][f]
+                    if piece:
+                        if piece==color+piece_type:
+                            return True
+                        break
+                else:
+                    break
+    
+    king_moves=[(-1,-1),(-1,0),(-1,1),(1,1),(1,0),(1,-1),(0,1),(0,-1)]
+    
+    for dr,df in king_moves:
+        r=rank+dr
+        f=file+df
+        if 0<=r<ROWS and 0<=f<COLS:
+            piece=game_state.board[r][f]
+            if piece and piece==color+'K':
+                return True
+    
+    return False
+
 def is_king_in_check(color):
-    king_pos = [
-        (r, f) for r in range(ROWS)
-        for f in range(COLS)
-        if game_state.board[r][f] == color + "K"
-    ]
+    king_pos=get_king_pos(color)
     if not king_pos:
         return False
-    kr, kf = king_pos[0]
+    opp_color='w' if color=='b' else 'b'
+    return is_square_attacked(king_pos[0],king_pos[1],opp_color)
+
+# Optimized version from paste
+def is_king_in_check_fast(color):
+    """Optimized check detection"""
+    # Find king position
+    king_pos = get_king_pos(color)
+    if not king_pos:
+        return False
+    
+    kr, kf = king_pos
     opp_color = 'b' if color == 'w' else 'w'
-    for r in range(ROWS):
-        for c in range(COLS):
-            piece = game_state.board[r][c]
-            if piece and piece[0] == opp_color:
-                possible = get_potential_moves(piece, r, c)
-                if (kr, kf) in possible:
+    
+    # Check for pawn attacks (most common)
+    pawn_dir = 1 if color == 'w' else -1
+    pawn_rank = kr - pawn_dir
+    if 0 <= pawn_rank < ROWS:
+        for pf in [kf-1, kf+1]:
+            if 0 <= pf < COLS and game_state.board[pawn_rank][pf] == opp_color + 'P':
+                return True
+    
+    # Check knight attacks
+    knight_moves = [(2,1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)]
+    for dr, df in knight_moves:
+        r, f = kr + dr, kf + df
+        if 0 <= r < ROWS and 0 <= f < COLS:
+            if game_state.board[r][f] == opp_color + 'N':
+                return True
+    
+    # Check sliding pieces (rook, bishop, queen)
+    directions = [
+        (1,0), (-1,0), (0,1), (0,-1),  # Rook directions
+        (1,1), (1,-1), (-1,1), (-1,-1)  # Bishop directions
+    ]
+    
+    for dr, df in directions:
+        for dist in range(1, 8):
+            r, f = kr + dr*dist, kf + df*dist
+            if not (0 <= r < ROWS and 0 <= f < COLS):
+                break
+            
+            piece = game_state.board[r][f]
+            if piece:
+                if piece[0] == opp_color:
+                    # Check if this piece can attack along this direction
+                    if ((dr == 0 or df == 0) and piece[1] in ['R', 'Q']) or \
+                       ((dr != 0 and df != 0) and piece[1] in ['B', 'Q']):
+                        return True
+                break
+    
+    # Check king attacks
+    for dr in [-1, 0, 1]:
+        for df in [-1, 0, 1]:
+            if dr == 0 and df == 0:
+                continue
+            r, f = kr + dr, kf + df
+            if 0 <= r < ROWS and 0 <= f < COLS:
+                if game_state.board[r][f] == opp_color + 'K':
                     return True
+    
     return False
+
+move_history=[]
+
+def make_move(from_p,to_p,piece):
+    from_r,from_f=from_p
+    to_r,to_f=to_p
+    
+    captured=game_state.board[to_r][to_f]
+    
+    move_info={
+        'from_p':from_p,
+        'to_p': to_p,
+        'piece':piece,
+        'captured':captured,
+        'king_cache':king_cache.copy()
+        }
+    
+    game_state.board[to_r][to_f]=piece
+    game_state.board[from_r][from_f]=""
+    
+    if piece[1]=='K':
+        king_cache[piece[0]]=to_p
+        
+    move_history.append(move_info)
+    return move_info
+    
+def undo_move(move_info):
+    from_r,from_f=move_info['from_p']
+    to_r,to_f=move_info['to_p']
+    
+    game_state.board[from_r][from_f]=move_info['piece']
+    game_state.board[to_r][to_f]=move_info['captured']
+    
+    global king_cache
+    king_cache=move_info['king_cache']
+    
+    move_history.pop()
+    return
+
+def order_moves(color):
+    captures=[]
+    nishe=[]
+    
+    for rank in range(ROWS):
+        for file in range(COLS):
+            piece=game_state.board[rank][file]
+            if piece and piece[0]==color:
+                moves=get_legal_moves(piece, rank, file)
+                
+                for to_r,to_f in moves:
+                    move_info2=((rank,file),(to_r,to_f),piece)
+                    
+                    if game_state.board[to_r][to_f]:
+                        captures.append(move_info2)
+                    else:
+                        nishe.append(move_info2)
+                        
+    return captures+nishe
+
+# Optimized move ordering from paste
+def order_moves_aggressive(color):
+    """Order moves for maximum alpha-beta efficiency"""
+    captures_high = []  # High-value captures
+    captures_low = []   # Low-value captures
+    checks = []         # Moves that give check
+    others = []         # Other moves
+    
+    capture_values = {'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0}
+    
+    for rank in range(ROWS):
+        for file in range(COLS):
+            piece = game_state.board[rank][file]
+            if piece and piece[0] == color:
+                moves = get_potential_moves(piece, rank, file)
+                
+                for to_r, to_f in moves:
+                    move_tuple = ((rank, file), (to_r, to_f), piece)
+                    target = game_state.board[to_r][to_f]
+                    
+                    if target:  # Capture
+                        target_value = capture_values.get(target[1], 0)
+                        attacker_value = capture_values.get(piece[1], 0)
+                        
+                        # Good captures (win material or equal trades)
+                        if target_value >= attacker_value:
+                            captures_high.append(move_tuple)
+                        else:
+                            captures_low.append(move_tuple)
+                    else:
+                        others.append(move_tuple)
+    
+    # Return in order of likely best moves first
+    return captures_high + captures_low + others
+
+# Fast pseudo-legal move generation (no legality checking)
+def get_pseudo_legal_moves_fast(color):
+    """Generate all pseudo-legal moves without expensive legality checks"""
+    moves = []
+    
+    for rank in range(ROWS):
+        for file in range(COLS):
+            piece = game_state.board[rank][file]
+            if piece and piece[0] == color:
+                piece_moves = get_potential_moves(piece, rank, file)
+                for to_r, to_f in piece_moves:
+                    moves.append(((rank, file), (to_r, to_f), piece))
+    
+    return moves
 
 def can_castle_kingside(color):
     if color == 'w':
@@ -37,35 +261,15 @@ def can_castle_kingside(color):
     if game_state.board[rank][5] != "" or game_state.board[rank][6] != "":
         return False
 
-    ##if is_king_in_check(color):
-      ##  return False
+    if is_king_in_check(color):
+        return False
+    
+    if is_square_attacked(rank, 5, 'b' if color == 'w' else 'w'):
+        return False
+    if is_square_attacked(rank, 6, 'b' if color == 'w' else 'w'):
+        return False
 
-    saved_king = game_state.board[king_start[0]][king_start[1]]
-
-    # step on (rank,5)
-    saved_5 = game_state.board[rank][5]
-    game_state.board[rank][5] = saved_king
-    game_state.board[king_start[0]][king_start[1]] = ""
-    """if is_king_in_check(color):
-        game_state.board[king_start[0]][king_start[1]] = saved_king
-        game_state.board[rank][5] = saved_5
-        return False"""
-    # revert
-    game_state.board[king_start[0]][king_start[1]] = saved_king
-    game_state.board[rank][5] = saved_5
-
-    # step on (rank,6)
-    saved_6 = game_state.board[rank][6]
-    game_state.board[rank][6] = saved_king
-    game_state.board[king_start[0]][king_start[1]] = ""
-    can_castle = True
-    ##if is_king_in_check(color):
-        ##can_castle = False
-    # revert
-    game_state.board[king_start[0]][king_start[1]] = saved_king
-    game_state.board[rank][6] = saved_6
-
-    return can_castle
+    return True
 
 def can_castle_queenside(color):
     if color == 'w':
@@ -87,35 +291,15 @@ def can_castle_queenside(color):
         game_state.board[rank][3] != ""):
         return False
 
-    ##if is_king_in_check(color):
-       ## return False
+    if is_king_in_check(color):
+       return False
+   
+    if is_square_attacked(rank, 2, 'b' if color == 'w' else 'w'):
+        return False
+    if is_square_attacked(rank, 3, 'b' if color == 'w' else 'w'):
+        return False
 
-    saved_king = game_state.board[king_start[0]][king_start[1]]
-
-    # step on (rank,3)
-    saved_3 = game_state.board[rank][3]
-    game_state.board[rank][3] = saved_king
-    game_state.board[king_start[0]][king_start[1]] = ""
-    """if is_king_in_check(color):
-        game_state.board[king_start[0]][king_start[1]] = saved_king
-        game_state.board[rank][3] = saved_3
-        return False"""
-    # revert
-    game_state.board[king_start[0]][king_start[1]] = saved_king
-    game_state.board[rank][3] = saved_3
-
-    # step on (rank,2)
-    saved_2 = game_state.board[rank][2]
-    game_state.board[rank][2] = saved_king
-    game_state.board[king_start[0]][king_start[1]] = ""
-    can_castle = True
-    ##if is_king_in_check(color):
-      ##  can_castle = False
-    # revert
-    game_state.board[king_start[0]][king_start[1]] = saved_king
-    game_state.board[rank][2] = saved_2
-
-    return can_castle
+    return True
 
 def get_potential_moves(piece, rank, file):
     moves = []
@@ -191,15 +375,12 @@ def get_legal_moves(piece, rank, file):
     color = piece[0]
     legal = []
     for (r,f) in naive_moves:
-        saved_piece = game_state.board[r][f]
-        game_state.board[r][f] = piece
-        game_state.board[rank][file] = ""
+        move=make_move((rank,file),(r,f),piece)
 
         if not is_king_in_check(color):
             legal.append((r,f))
 
-        game_state.board[rank][file] = piece
-        game_state.board[r][f] = saved_piece
+        undo_move(move)
     return legal
 
 def promote_pawn(rank, file):
