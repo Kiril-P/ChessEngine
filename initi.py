@@ -3,6 +3,7 @@ import os
 import random
 from var import *
 from basfunc import is_king_in_check
+import chess
 
 pygame.init()
 
@@ -52,7 +53,11 @@ def draw_board():
 
     # 2. Highlight last move squares
     if game_state.last_move:
-        for (r, f) in game_state.last_move:
+        # Convert python-chess move to coordinates
+        from_coords = square_to_coords(game_state.last_move.from_square)
+        to_coords = square_to_coords(game_state.last_move.to_square)
+        
+        for (r, f) in [from_coords, to_coords]:
             rect = (f * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE)
             pygame.draw.rect(screen, LAST_MOVE_COLOR, rect)
 
@@ -65,24 +70,33 @@ def draw_board():
     # 4. Draw pieces (unless currently dragging)
     for rank in range(ROWS):
         for file in range(COLS):
-            piece = game_state.board[rank][file]
-            if piece and not (game_state.selected_piece and (rank, file) == game_state.selected_pos):
+            piece_str = game_state.get_piece_at(rank, file)
+            if piece_str and not (game_state.selected_piece and (rank, file) == game_state.selected_pos):
                 x, y = file * SQUARE_SIZE, rank * SQUARE_SIZE
-                screen.blit(PIECE_IMAGES[piece], (x, y))
+                if piece_str in PIECE_IMAGES:
+                    screen.blit(PIECE_IMAGES[piece_str], (x, y))
 
     # 5. Highlight legal moves
     if game_state.legal_moves:
-        highlight_squares(game_state.legal_moves, HIGHLIGHT_COLOR_LIGHT, HIGHLIGHT_COLOR_DARK)
+        # Convert legal moves to coordinates
+        legal_coords = []
+        for move in game_state.legal_moves:
+            if hasattr(move, 'to_square'):
+                # It's a python-chess Move object
+                to_coords = square_to_coords(move.to_square)
+                legal_coords.append(to_coords)
+            else:
+                # It's already coordinates
+                legal_coords.append(move)
+        
+        highlight_squares(legal_coords, HIGHLIGHT_COLOR_LIGHT, HIGHLIGHT_COLOR_DARK)
 
     # 6. Highlight king in check with a red border
     for color in ['w', 'b']:
         if is_king_in_check(color):
-            king_positions = [
-                (r, f) for r in range(ROWS) for f in range(COLS)
-                if game_state.board[r][f] == color + "K"
-            ]
-            if king_positions:
-                kr, kf = king_positions[0]
+            king_pos = get_king_pos(color)
+            if king_pos:
+                kr, kf = king_pos
                 check_rect = pygame.Rect(kf * SQUARE_SIZE, kr * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE)
                 pygame.draw.rect(screen, CHECK_COLOR, check_rect, 4)
 
