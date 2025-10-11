@@ -4,7 +4,8 @@ import chess.pgn
 import time
 from var import *
 from initi import *
-from savingtsptables import enhanced_best_move, load_transposition_table, save_transposition_table, enhanced_tt
+from savingtsptables import pure_minimax_best_move,enhanced_best_move, load_transposition_table, save_transposition_table, enhanced_tt
+from A0NN import *
 
 MaxDepth = 4
 
@@ -162,6 +163,62 @@ def check_game_over(board):
         return True
     return False
 
+def train_on_engine(model,num_games=100,max_moves=50):
+    for j in range(num_games):
+        board=chess.Board()
+        moves_made=0
+
+        while not board.is_game_over() and moves_made<max_moves:
+            #engine_move=enhanced_best_move(board,save=False,load=False,use_tt=False)
+            engine_move=pure_minimax_best_move(board)
+
+            if not engine_move:
+                break
+            board_tensor=board_to_tensor(board)
+            
+            target_policy=np.zeros(4672)
+            move_idx=move_to_idx(engine_move)
+            target_policy[move_idx]=1
+            
+            engine_score=board_score_enhanced(board)
+            target_values=np.tanh(engine_score/1000.0)
+            
+            model.fit(board_tensor[None,...],{
+                'policy':target_policy[None,...],'value':np.array([[target_values]])
+                },epochs=1,verbose=0)
+            
+            #After making the move
+            
+            board.push(engine_move)
+            moves_made+=1
+            if not board.is_game_over():
+                result_board_tensor=board_to_tensor(board)
+                result_score=board_score_enhanced(board)
+                result_values=np.tanh(result_score/1000.0)
+                
+                model.fit(result_board_tensor[None,...],{
+                    'policy':target_policy[None,...],'value':np.array([[result_values]])
+                    },epochs=1,verbose=0)
+                
+    return model
+
+
+
+def save_model(model,filename='training_model.weights.h5'):
+    model.save_weights(filename)
+    print("Saved model to file successfully")
+    
+                            
+def load_model(model,filename='training_model.weights.h5'):
+    try:
+        model.load_weights(filename)
+        print("Loaded model successfulyl")
+        return True
+    
+    except Exception as e:
+        print(f"Couldn't load model. Erros: {e}")    
+        return False
+
 def main():
     pygame.init()
     load_piece_images()
@@ -169,6 +226,14 @@ def main():
     
     # Initialize python-chess board
     board = chess.Board()
+    model=create_alpha0()
+    
+    #print(model.summary())
+    
+    if not load_model(model):
+        print("No existing model found. Training...")
+        train_on_engine(model)
+        save_model(model)
     
     running = True
     selected_piece_pos = None
@@ -189,11 +254,16 @@ def main():
             print(f"Position: {board.fen()}")
             
             # Use the enhanced best move function
+
+                     
+                
+                
             best_move = enhanced_best_move(board, save=True, load=False)
-            
-            if best_move:
-                print(f"Black plays: {best_move}")
-                board.push(best_move)
+            best_move2=mcts_search(model,board)
+            if best_move2:
+                print(f"AB plays: {best_move}")
+                print(f"Black plays: {best_move2}")
+                board.push(best_move2)
                 
                 end_time = time.time()
                 print(f"Black move completed in {end_time-start_time:.3f}s")
@@ -274,7 +344,7 @@ def main():
                 status_text = "Stalemate!"
             else:
                 status_text = "Game Over!"
-            
+            rl_agent.save_model()
             text_surface = SMALL_FONT.render(status_text, True, (255, 255, 255))
             text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
             screen.blit(text_surface, text_rect)

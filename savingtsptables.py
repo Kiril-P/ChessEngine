@@ -62,7 +62,7 @@ class EnhancedTranspositionTable:
         
         pos_hash = self._get_position_hash(board)
         # Convert move to string for JSON serialization
-        move_str = str(best_move) if best_move else None
+        move_str = best_move.uci() if isinstance(best_move, chess.Move) else (best_move if isinstance(best_move, str) else None)
         self.table[pos_hash] = {
             'score': score,
             'depth': depth,
@@ -195,13 +195,17 @@ def get_ordered_moves_enhanced(board, tt_best_move=None):
     # 1. Try transposition table best move first
     if tt_best_move:
         try:
-            # Convert string back to Move object
-            move = chess.Move.from_uci(tt_best_move)
+            # Accept either a Move object or a UCI string
+            if isinstance(tt_best_move, chess.Move):
+                move = tt_best_move
+            else:
+                # Convert string back to Move object
+                move = chess.Move.from_uci(tt_best_move)
             if move in legal_moves:
                 ordered_moves.append(move)
                 legal_moves.remove(move)
         except:
-            pass  # Invalid move string
+            pass  # Invalid move
     
     # 2. Separate captures and quiet moves
     captures = []
@@ -236,130 +240,166 @@ def get_ordered_moves_enhanced(board, tt_best_move=None):
     
     return ordered_moves + capture_moves + quiet_moves
 
-def enhanced_minimax(board, depth, alpha, beta, max_depth, maximizing_player=True):
-    """Enhanced minimax using python-chess board"""
-    global enhanced_tt
-    
-    # Transposition table lookup
-    tt_score, tt_best_move = enhanced_tt.lookup(board, depth, alpha, beta)
-    if tt_score is not None:
-        return tt_score, tt_best_move
-    
-    # Terminal conditions
-    if depth == 0 or board.is_game_over():
-        score = board_score_enhanced(board)
-        # Only store deeper searches to avoid cache pollution
-        if depth < max_depth - 1:
-            enhanced_tt.store(board, score, depth, node_type='exact')
-        return score, None
-    
-    # Move ordering - try TT move first, then captures, then others
-    moves = get_ordered_moves_enhanced(board, tt_best_move)
-    if not moves:
-        return board_score_enhanced(board), None
-    
-    best_move = None
-    original_alpha = alpha
-    
-    if maximizing_player:  # White to move
-        max_score = -float('inf')
-        
-        for move in moves:
-            # Make move
-            board.push(move)
-            
-            # Recursive call
-            score, _ = enhanced_minimax(board, depth - 1, alpha, beta, max_depth, False)
-            
-            # Undo move
-            board.pop()
-            
-            if score > max_score:
-                max_score = score
-                best_move = move
-            
-            alpha = max(alpha, score)
-            if beta <= alpha:
-                break  # Alpha-beta pruning
-        
-        # Store in transposition table with proper node type
-        node_type = 'exact'
-        if max_score <= original_alpha:
-            node_type = 'upper'
-        elif max_score >= beta:
-            node_type = 'lower'
-        
-        enhanced_tt.store(board, max_score, depth, best_move, node_type)
-        return max_score, best_move
-    
-    else:  # Black to move
-        min_score = float('inf')
-        
-        for move in moves:
-            # Make move
-            board.push(move)
-            
-            # Recursive call
-            score, _ = enhanced_minimax(board, depth - 1, alpha, beta, max_depth, True)
-            
-            # Undo move
-            board.pop()
-            
-            if score < min_score:
-                min_score = score
-                best_move = move
-            
-            beta = min(beta, score)
-            if beta <= alpha:
-                break  # Alpha-beta pruning
-        
-        # Store in transposition table with proper node type
-        node_type = 'exact'
-        if min_score <= original_alpha:
-            node_type = 'upper'
-        elif min_score >= beta:
-            node_type = 'lower'
-        
-        enhanced_tt.store(board, min_score, depth, best_move, node_type)
-        return min_score, best_move
+def enhanced_minimax(board, depth, alpha, beta, max_depth, maximizing_player=True, use_tt=True):
+	"""Enhanced minimax using python-chess board
+	
+	Parameters:
+	- use_tt: when False, disables transposition table lookup and storage
+	"""
+	global enhanced_tt
+	
+	# Transposition table lookup
+	if use_tt:
+		tt_score, tt_best_move = enhanced_tt.lookup(board, depth, alpha, beta)
+		if tt_score is not None:
+			# Ensure we return a chess.Move object if available
+			move_obj = None
+			if isinstance(tt_best_move, chess.Move):
+				move_obj = tt_best_move
+			elif isinstance(tt_best_move, str):
+				try:
+					move_obj = chess.Move.from_uci(tt_best_move)
+				except:
+					move_obj = None
+			return tt_score, move_obj
+	
+	# Terminal conditions
+	if depth == 0 or board.is_game_over():
+		score = board_score_enhanced(board)
+		# Only store deeper searches to avoid cache pollution
+		if use_tt and depth < max_depth - 1:
+			enhanced_tt.store(board, score, depth, node_type='exact')
+		return score, None
+	
+	# Move ordering - try TT move first, then captures, then others
+	tt_best_move = None
+	if use_tt:
+		_, tt_best_move = enhanced_tt.lookup(board, depth, alpha, beta)
+	moves = get_ordered_moves_enhanced(board, tt_best_move)
+	if not moves:
+		return board_score_enhanced(board), None
+	
+	best_move = None
+	original_alpha = alpha
+	
+	if maximizing_player:  # White to move
+		max_score = -float('inf')
+		
+		for move in moves:
+			# Make move
+			board.push(move)
+			
+			# Recursive call
+			score, _ = enhanced_minimax(board, depth - 1, alpha, beta, max_depth, False, use_tt)
+			
+			# Undo move
+			board.pop()
+			
+			if score > max_score:
+				max_score = score
+				best_move = move
+			
+			alpha = max(alpha, score)
+			if beta <= alpha:
+				break  # Alpha-beta pruning
+		
+		# Store in transposition table with proper node type
+		if use_tt:
+			node_type = 'exact'
+			if max_score <= original_alpha:
+				node_type = 'upper'
+			elif max_score >= beta:
+				node_type = 'lower'
+			
+			enhanced_tt.store(board, max_score, depth, best_move, node_type)
+		return max_score, best_move
+	
+	else:  # Black to move
+		min_score = float('inf')
+		
+		for move in moves:
+			# Make move
+			board.push(move)
+			
+			# Recursive call
+			score, _ = enhanced_minimax(board, depth - 1, alpha, beta, max_depth, True, use_tt)
+			
+			# Undo move
+			board.pop()
+			
+			if score < min_score:
+				min_score = score
+				best_move = move
+			
+			beta = min(beta, score)
+			if beta <= alpha:
+				break  # Alpha-beta pruning
+		
+		# Store in transposition table with proper node type
+		if use_tt:
+			node_type = 'exact'
+			if min_score <= original_alpha:
+				node_type = 'upper'
+			elif min_score >= beta:
+				node_type = 'lower'
+			
+			enhanced_tt.store(board, min_score, depth, best_move, node_type)
+		return min_score, best_move
 
-def enhanced_best_move(board, save=False, load=False):
-    """Enhanced best move using python-chess board"""
-    global enhanced_tt
-    
-    if load:
-        load_transposition_table()
-    
-    # Check opening book first
-    cur_fen = board.fen()  
-    player_moves = get_opening_move(cur_fen)
-    
-    if player_moves:
-        # Try to convert opening book move to chess.Move
-        try:
-            # Assuming opening book moves are in UCI format
-            move_str = player_moves[0]
-            move = chess.Move.from_uci(move_str)
-            if move in board.legal_moves:
-                print(f"Using opening book move: {move}")
-                return move
-        except:
-            print("Failed to parse opening book move, using search")
-    
-    print(f"Searching depth {MaxDepth}...")
-    
-    # Determine if we're maximizing (White to move)
-    maximizing = board.turn == chess.WHITE
-    
-    # Use the enhanced minimax
-    score, best_move = enhanced_minimax(
-        board, MaxDepth, -float('inf'), float('inf'), MaxDepth, maximizing
-    )
-    
-    print(enhanced_tt.get_stats())
-    print(f"Best move score: {score}")
-    
-    if save:
-        save_transposition_table()
-    
-    return best_move
+def enhanced_best_move(board, save=False, load=False, use_tt=True):
+	"""Enhanced best move using python-chess board
+	
+	Parameters:
+	- use_tt: when False, disables transposition table lookup and storage
+	"""
+	global enhanced_tt
+	
+	if load and use_tt:
+		load_transposition_table()
+	
+	# Check opening book first
+	"""cur_fen = board.fen()  
+	player_moves = get_opening_move(cur_fen)
+	
+	if player_moves:
+		# Try to convert opening book move to chess.Move
+		try:
+			# Assuming opening book moves are in UCI format
+			move_str = player_moves[0]
+			move = chess.Move.from_uci(move_str)
+			if move in board.legal_moves:
+				print(f"Using opening book move: {move}")
+				return move
+		except:
+			print("Failed to parse opening book move, using search")"""
+	
+	print(f"Searching depth {MaxDepth}...")
+	
+	# Determine if we're maximizing (White to move)
+	maximizing = board.turn == chess.WHITE
+	
+	# Use the enhanced minimax
+	score, best_move = enhanced_minimax(
+		board, MaxDepth, -float('inf'), float('inf'), MaxDepth, maximizing, use_tt
+	)
+	
+	print(enhanced_tt.get_stats())
+	print(f"Best move score: {score}")
+	
+	if save and use_tt:
+		save_transposition_table()
+	
+	# Ensure returning a chess.Move object
+	if isinstance(best_move, str):
+		try:
+			best_move = chess.Move.from_uci(best_move)
+		except:
+			best_move = None
+	
+	return best_move
+
+# Pure minimax convenience wrapper (never uses TT)
+
+def pure_minimax_best_move(board):
+	_, move = enhanced_minimax(board, MaxDepth, -float('inf'), float('inf'), MaxDepth, board.turn == chess.WHITE, use_tt=False)
+	return move
