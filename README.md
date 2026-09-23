@@ -11,8 +11,6 @@ Play chess on a Pygame board and explore how search and evaluation choose a move
 - Minimax and alpha-beta search, move ordering, and persistent transposition tables.
 - Experimental TensorFlow policy/value-network code in `A0NN.py`.
 
-The image is an existing project screenshot from the portfolio; it is not a new engine-strength benchmark.
-
 ## Development
 
 Python with `pygame`, `python-chess`, `numpy`, and `tensorflow` is required by the current imports. Run from the repository root so relative piece and data paths resolve:
